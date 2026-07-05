@@ -252,6 +252,29 @@ func (s *scope) resolveUnqualified(column string) Name {
 		t := s.physical[0]
 		return Name{Schema: t.Schema, Table: t.Table, Column: column}
 	}
+	if len(s.physical) == 0 && column != "" {
+		var resolved Name
+		cteMatches := 0
+		seenCTE := make(map[string]struct{})
+		for _, b := range s.bindings {
+			if b.kind != bindingCTE {
+				continue
+			}
+			if _, ok := seenCTE[b.cteName]; ok {
+				continue
+			}
+			seenCTE[b.cteName] = struct{}{}
+			if cte, ok := s.ctes[b.cteName]; ok {
+				if col, ok := cte.outputCols[column]; ok {
+					cteMatches++
+					resolved = col
+				}
+			}
+		}
+		if cteMatches == 1 {
+			return resolved
+		}
+	}
 	if len(s.physical) > 1 {
 		return Name{Column: column}
 	}
@@ -292,4 +315,78 @@ func (s *scope) resolveSchemaQualified(schema, table, column string) Name {
 		}
 	}
 	return Name{Schema: schema, Table: table, Column: column}
+}
+
+// Scope exposes read-only scope helpers for AST transforms.
+type Scope struct {
+	s *scope
+}
+
+// ResolveStarFromVal returns table.* references when val is a SELECT * projection.
+func (s *Scope) ResolveStarFromVal(val *pg_query.Node) []Name {
+	if val == nil || s == nil || s.s == nil {
+		return nil
+	}
+	cr := val.GetColumnRef()
+	if cr == nil {
+		return nil
+	}
+	parts := columnRefParts(cr)
+	if len(parts) == 0 {
+		return nil
+	}
+	if parts[0] == "*" || (len(parts) == 2 && parts[1] == "*") {
+		return s.s.resolveStar(parts)
+	}
+	return nil
+}
+
+// NewScopeForSelect builds a scope for a SELECT statement target list.
+func NewScopeForSelect(sel *pg_query.SelectStmt) *Scope {
+	sc := newScope(nil)
+	if sel == nil {
+		return &Scope{s: sc}
+	}
+	sc.registerCTEs(sel.WithClause)
+	sc.registerFromClause(sel.FromClause)
+	return &Scope{s: sc}
+}
+
+// NewScopeForInsert builds a scope for INSERT RETURNING.
+func NewScopeForInsert(ins *pg_query.InsertStmt) *Scope {
+	sc := newScope(nil)
+	if ins != nil && ins.Relation != nil {
+		sc.bindRangeVar(ins.Relation)
+	}
+	return &Scope{s: sc}
+}
+
+// NewScopeForUpdate builds a scope for UPDATE RETURNING.
+func NewScopeForUpdate(upd *pg_query.UpdateStmt) *Scope {
+	sc := newScope(nil)
+	if upd == nil {
+		return &Scope{s: sc}
+	}
+	sc.registerCTEs(upd.WithClause)
+	if upd.Relation != nil {
+		sc.bindRangeVar(upd.Relation)
+	}
+	sc.registerFromClause(upd.FromClause)
+	return &Scope{s: sc}
+}
+
+// NewScopeForDelete builds a scope for DELETE RETURNING.
+func NewScopeForDelete(del *pg_query.DeleteStmt) *Scope {
+	sc := newScope(nil)
+	if del == nil {
+		return &Scope{s: sc}
+	}
+	sc.registerCTEs(del.WithClause)
+	if del.Relation != nil {
+		sc.bindRangeVar(del.Relation)
+	}
+	for _, n := range del.UsingClause {
+		sc.registerFromItem(n)
+	}
+	return &Scope{s: sc}
 }

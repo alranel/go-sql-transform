@@ -5,13 +5,17 @@ A Go library for parsing and transforming PostgreSQL DML queries.
 `go-sql-transform` parses `SELECT`, `INSERT`, `UPDATE`, and `DELETE` statements (including joins, CTEs, and subqueries) and lets you:
 
 - Inspect which **physical** tables and columns a query reads or writes
+- List **function calls** in the query
 - Determine the top-level command type
 - **Rename** tables and columns in the query text
+- **Expand** `SELECT *` / `table.*` in projections and `RETURNING` lists to explicit columns
 
 Typical use cases:
 
 - **Privilege checks** — verify that tables/columns referenced by a query exist and are readable/writable for the current user
+- **Function allowlists** — detect calls to built-in or extension functions before executing user SQL
 - **Logical-to-physical mapping** — rewrite logical table/column names in application SQL to the real names in the underlying database (for example multi-tenant table routing)
+- **Column-level enforcement** — expand `SELECT *` to the columns the caller is allowed to read
 
 Parsing is powered by the official PostgreSQL parser ([libpg_query](https://github.com/pganalyze/libpg_query)) via [go-pgquery](https://github.com/wasilibs/go-pgquery) (WebAssembly, no cgo required).
 
@@ -83,7 +87,9 @@ Returns the top-level command: `SELECT`, `INSERT`, `UPDATE`, or `DELETE`.
 
 ### `(*Query) ReadReferences() []Reference`
 
-Returns deduplicated **physical** table and column names that the query reads (from clauses, projections, filters, joins, subqueries, CTE bodies, etc.).
+Returns deduplicated **physical** table and column names that the query reads (from clauses, projections, filters, joins, subqueries, CTE bodies, `UPDATE`/`DELETE` `RETURNING` lists, etc.).
+
+For `UPDATE`, read references include columns from `FROM`, `WHERE`, `RETURNING`, and CTEs. For `DELETE`, they include columns from `USING`, `WHERE`, `RETURNING`, and CTEs.
 
 Aliases and CTE names are resolved away. For example, `u.name` with `FROM users u` is reported as `users.name`, and `a.id` through a CTE that selects `id` from `users` is reported as `users.id`.
 
@@ -123,6 +129,34 @@ q.Replace(
 
 Replacement is **alias-aware**: `u.email` is matched when replacing `{Table: "users", Column: "email"}` and `u` is an alias for `users`. Table aliases themselves are not renamed.
 
+### `(*Query) FunctionCalls() []FuncCall`
+
+Returns deduplicated function invocations found anywhere in the query (projections, filters, `GROUP BY`, `HAVING`, `RETURNING`, subqueries, CTEs, etc.).
+
+Schema-qualified calls such as `pg_catalog.lower(...)` are reported with `Schema` set to the qualifier and `Name` set to the function name. Literals and operators are not included.
+
+### `(*Query) ExpandStar(expand ExpandStarFunc) error`
+
+Replaces `SELECT *` and `table.*` in projection and `RETURNING` lists with explicit column references.
+
+You provide a callback that receives the physical table name for each star and returns the columns to substitute. Return an error to abort expansion, or return a filtered column list to omit unreadable columns:
+
+```go
+err := q.ExpandStar(func(table sqltransform.Name) ([]sqltransform.Name, error) {
+	if table.Table != "users" {
+		return nil, fmt.Errorf("unknown table %q", table.Table)
+	}
+	return []sqltransform.Name{
+		{Table: "users", Column: "id"},
+		{Table: "users", Column: "name"},
+	}, nil
+})
+```
+
+Expansion runs through nested `SELECT`s, set operations (`UNION`, etc.), and CTE bodies. `INSERT ... SELECT` is expanded in the source query; `UPDATE`/`DELETE` stars are expanded only in `RETURNING` lists.
+
+After expansion, call `SQL()` to deparse the modified query.
+
 ### `(*Query) SQL() (string, error)`
 
 Deparses the (possibly modified) AST back to a SQL string.
@@ -143,6 +177,15 @@ type Reference struct {
 
 `Name.String()` formats a reference for display, for example `users.email`, `public.users`, or `users.*`.
 
+```go
+type FuncCall struct {
+	Schema string // optional catalog/schema prefix
+	Name   string // function name (last component)
+}
+
+type ExpandStarFunc func(table Name) ([]Name, error)
+```
+
 ## Reference resolution
 
 `ReadReferences` and `WriteReferences` always return **physical** names suitable for catalog/privilege lookups:
@@ -161,7 +204,8 @@ Unqualified column names (`email` with no table prefix) are resolved when exactl
 - **DML only** — `SELECT`, `INSERT`, `UPDATE`, `DELETE` (no `MERGE`, DDL, or utility statements)
 - **Single statement** — multi-statement strings are rejected
 - **`INSERT` without a column list** — write columns cannot be enumerated; only the target table is reported
-- **`SELECT *`** — reported as `table.*`, not expanded to individual columns
+- **`SELECT *`** — `ReadReferences` reports `table.*`, not individual columns; use `ExpandStar` to rewrite stars to explicit columns
+- **`ExpandStar` scope** — only projection and `RETURNING` lists are rewritten; stars elsewhere (for example in `WHERE`) are unchanged
 - **Deparse formatting** — output SQL may differ in whitespace or quoting; semantics are preserved
 - **Unqualified column replacement** — when `from.Table` is set, only qualified column references match; bare column names are not disambiguated by table
 

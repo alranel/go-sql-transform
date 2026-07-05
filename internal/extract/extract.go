@@ -133,10 +133,22 @@ func (c *collector) collectUpdate(upd *pg_query.UpdateStmt, parentScope *scope) 
 	}
 	if c.mode == modeRead {
 		sc := newScope(parentScope)
+		sc.registerCTEs(upd.WithClause)
+		c.collectCTEBodies(upd.WithClause, parentScope)
 		if rel != nil {
 			sc.bindRangeVar(rel)
 		}
+		sc.registerFromClause(upd.FromClause)
+		for _, n := range upd.FromClause {
+			c.collectFromExprs(n, sc)
+		}
+		for _, t := range upd.TargetList {
+			c.collectNode(t, sc)
+		}
 		c.collectNode(upd.WhereClause, sc)
+		for _, t := range upd.ReturningList {
+			c.collectNode(t, sc)
+		}
 	}
 }
 
@@ -151,10 +163,19 @@ func (c *collector) collectDelete(del *pg_query.DeleteStmt, parentScope *scope) 
 	}
 	if c.mode == modeRead {
 		sc := newScope(parentScope)
+		sc.registerCTEs(del.WithClause)
+		c.collectCTEBodies(del.WithClause, parentScope)
 		if rel != nil {
 			sc.bindRangeVar(rel)
 		}
+		for _, n := range del.UsingClause {
+			sc.registerFromItem(n)
+			c.collectFromExprs(n, sc)
+		}
 		c.collectNode(del.WhereClause, sc)
+		for _, t := range del.ReturningList {
+			c.collectNode(t, sc)
+		}
 	}
 }
 
@@ -182,7 +203,8 @@ func (c *collector) collectNode(node *pg_query.Node, sc *scope) {
 	case node.GetSubLink() != nil:
 		sl := node.GetSubLink()
 		c.collectNode(sl.Testexpr, sc)
-		c.collectSelect(sl.Subselect.GetSelectStmt(), sc.parent)
+		subScope := newScope(sc)
+		c.collectSelect(sl.Subselect.GetSelectStmt(), subScope)
 	case node.GetJoinExpr() != nil:
 		j := node.GetJoinExpr()
 		c.collectNode(j.Larg, sc)
