@@ -98,6 +98,27 @@ func (s *replaceScope) physicalTableForQualifier(qualifier string) string {
 	return ""
 }
 
+// aliasForTable returns the SQL alias for a logical table name in the current scope.
+func (s *replaceScope) aliasForTable(table string) string {
+	if s == nil {
+		return ""
+	}
+	var found string
+	for qualifier, tn := range s.bindings {
+		if !equalFold(tn.Table, table) {
+			continue
+		}
+		if equalFold(qualifier, table) {
+			continue
+		}
+		if found != "" && !equalFold(found, qualifier) {
+			return ""
+		}
+		found = qualifier
+	}
+	return found
+}
+
 // unqualifiedColumnMatchesTable reports whether a bare column reference can be
 // attributed to from.Table (exactly one table in scope and it matches from).
 func (s *replaceScope) unqualifiedColumnMatchesTable(from Name) bool {

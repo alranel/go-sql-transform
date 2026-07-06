@@ -298,7 +298,14 @@ func applyColumnRef(cr *pg_query.ColumnRef, from, to Name, sc *replaceScope) {
 		parts[len(parts)-1] = to.Column
 	}
 	if to.Table != "" && len(parts) >= 2 {
-		parts[len(parts)-2] = to.Table
+		qualIdx := len(parts) - 2
+		if equalFold(parts[qualIdx], from.Table) {
+			if alias := sc.aliasForTable(from.Table); alias != "" {
+				parts[qualIdx] = alias
+			} else {
+				parts[qualIdx] = to.Table
+			}
+		}
 	}
 	if to.Schema != "" && len(parts) == 3 {
 		parts[0] = to.Schema

@@ -75,6 +75,40 @@ func TestReplace_columnAliasAware(t *testing.T) {
 	if !strings.Contains(sql, "email_enc") {
 		t.Fatalf("expected email_enc in %q", sql)
 	}
+	if strings.Contains(sql, "users.email_enc") {
+		t.Fatalf("alias qualifier should be preserved in %q", sql)
+	}
+}
+
+func TestReplace_joinAliasPreservesQualifierInON(t *testing.T) {
+	q, err := sqltransform.Parse(`SELECT * FROM book b LEFT JOIN author a ON a.id = b.author`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "book", Column: "id"}, sqltransform.Name{Table: "o_book", Column: "f_id"}},
+		{sqltransform.Name{Table: "book", Column: "author"}, sqltransform.Name{Table: "o_book", Column: "f_author"}},
+		{sqltransform.Name{Table: "author", Column: "id"}, sqltransform.Name{Table: "o_author", Column: "f_id"}},
+		{sqltransform.Name{Table: "book"}, sqltransform.Name{Table: "o_book"}},
+		{sqltransform.Name{Table: "author"}, sqltransform.Name{Table: "o_author"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sql, "o_author.") || strings.Contains(sql, "o_book.") {
+		t.Fatalf("column refs should use aliases, not physical table qualifiers: %q", sql)
+	}
+	if !strings.Contains(sql, "a.f_id") || !strings.Contains(sql, "b.f_author") {
+		t.Fatalf("expected alias-qualified ON clause in %q", sql)
+	}
 }
 
 func TestReplace_columnUnqualifiedSingleTable(t *testing.T) {
