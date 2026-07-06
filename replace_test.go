@@ -76,3 +76,38 @@ func TestReplace_columnAliasAware(t *testing.T) {
 		t.Fatalf("expected email_enc in %q", sql)
 	}
 }
+
+func TestReplace_columnUnqualifiedSingleTable(t *testing.T) {
+	q, err := sqltransform.Parse("SELECT author FROM book WHERE id = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Replace(
+		sqltransform.Name{Table: "book", Column: "author"},
+		sqltransform.Name{Table: "o_book", Column: "f_author"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Replace(
+		sqltransform.Name{Table: "book", Column: "id"},
+		sqltransform.Name{Table: "o_book", Column: "id"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Replace(
+		sqltransform.Name{Table: "book"},
+		sqltransform.Name{Table: "o_book"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sql, " author") && !strings.Contains(sql, "f_author") {
+		t.Fatalf("expected f_author in %q", sql)
+	}
+	if !strings.Contains(sql, "o_book") {
+		t.Fatalf("expected o_book in %q", sql)
+	}
+}

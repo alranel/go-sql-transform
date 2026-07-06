@@ -285,7 +285,11 @@ func applyColumnRef(cr *pg_query.ColumnRef, from, to Name, sc *replaceScope) {
 		return
 	}
 	if from.Table != "" {
-		if !qualifierMatchesTable(sc, schema, table, from) {
+		if len(parts) == 1 {
+			if !sc.unqualifiedColumnMatchesTable(from) {
+				return
+			}
+		} else if !qualifierMatchesTable(sc, schema, table, from) {
 			return
 		}
 	}

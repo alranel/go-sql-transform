@@ -97,3 +97,32 @@ func (s *replaceScope) physicalTableForQualifier(qualifier string) string {
 	}
 	return ""
 }
+
+// unqualifiedColumnMatchesTable reports whether a bare column reference can be
+// attributed to from.Table (exactly one table in scope and it matches from).
+func (s *replaceScope) unqualifiedColumnMatchesTable(from Name) bool {
+	if s == nil || from.Table == "" {
+		return from.Table == ""
+	}
+	var unique []extract.Name
+	seen := map[string]struct{}{}
+	for _, tn := range s.bindings {
+		key := tn.Schema + "\x00" + tn.Table
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, tn)
+	}
+	if len(unique) != 1 {
+		return false
+	}
+	tn := unique[0]
+	if !equalFold(tn.Table, from.Table) {
+		return false
+	}
+	if from.Schema != "" && !equalFold(tn.Schema, from.Schema) {
+		return false
+	}
+	return true
+}
