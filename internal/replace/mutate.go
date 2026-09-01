@@ -102,6 +102,14 @@ func applyUpdate(upd *pg_query.UpdateStmt, from, to Name) {
 	if rel != nil {
 		tn = extract.Name{Schema: rel.Schemaname, Table: rel.Relname}
 	}
+
+	sc := newReplaceScope(nil)
+	sc.registerCTEs(upd.WithClause)
+	if rel != nil {
+		sc.bindRangeVar(rel)
+	}
+	sc.registerFromClause(upd.FromClause)
+
 	if from.Column == "" {
 		applyRangeVar(rel, from, to, nil)
 	} else {
@@ -109,14 +117,14 @@ func applyUpdate(upd *pg_query.UpdateStmt, from, to Name) {
 			rt := t.GetResTarget()
 			if rt != nil {
 				applyResTargetName(rt, from, to, tn)
+				applyNodeWithScope(rt.Val, from, to, sc)
 			}
 		}
 	}
-	sc := newReplaceScope(nil)
-	if rel != nil {
-		sc.bindRangeVar(rel)
-	}
 	applyNodeWithScope(upd.WhereClause, from, to, sc)
+	for _, t := range upd.ReturningList {
+		applyNodeWithScope(t, from, to, sc)
+	}
 }
 
 func applyDelete(del *pg_query.DeleteStmt, from, to Name) {

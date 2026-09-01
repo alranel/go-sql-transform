@@ -111,6 +111,33 @@ func TestReplace_joinAliasPreservesQualifierInON(t *testing.T) {
 	}
 }
 
+func TestReplace_updateSetExpressionColumns(t *testing.T) {
+	q, err := sqltransform.Parse(`UPDATE domanda SET d_col = a_col WHERE d_col = 0 AND a_col > 0`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "domanda", Column: "d_col"}, sqltransform.Name{Table: "o_domanda", Column: "f_d_col"}},
+		{sqltransform.Name{Table: "domanda", Column: "a_col"}, sqltransform.Name{Table: "o_domanda", Column: "f_a_col"}},
+		{sqltransform.Name{Table: "domanda"}, sqltransform.Name{Table: "o_domanda"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := "UPDATE o_domanda SET f_d_col = f_a_col WHERE f_d_col = 0 AND f_a_col > 0"
+	if sql != expected {
+		t.Fatalf("got %q want %q", sql, expected)
+	}
+}
+
 func TestReplace_columnUnqualifiedSingleTable(t *testing.T) {
 	q, err := sqltransform.Parse("SELECT author FROM book WHERE id = 1")
 	if err != nil {
