@@ -97,6 +97,14 @@ func applyUpdate(upd *pg_query.UpdateStmt, from, to Name) {
 	if upd == nil {
 		return
 	}
+	if upd.WithClause != nil {
+		for _, cte := range upd.WithClause.Ctes {
+			cteNode := cte.GetCommonTableExpr()
+			if cteNode != nil {
+				applySelect(cteNode.Ctequery.GetSelectStmt(), from, to)
+			}
+		}
+	}
 	rel := upd.Relation
 	tn := extract.Name{}
 	if rel != nil {
@@ -112,13 +120,17 @@ func applyUpdate(upd *pg_query.UpdateStmt, from, to Name) {
 
 	if from.Column == "" {
 		applyRangeVar(rel, from, to, nil)
-	} else {
-		for _, t := range upd.TargetList {
-			rt := t.GetResTarget()
-			if rt != nil {
+	}
+	for _, n := range upd.FromClause {
+		applyFromItem(n, from, to, sc)
+	}
+	for _, t := range upd.TargetList {
+		rt := t.GetResTarget()
+		if rt != nil {
+			if from.Column != "" {
 				applyResTargetName(rt, from, to, tn)
-				applyNodeWithScope(rt.Val, from, to, sc)
 			}
+			applyNodeWithScope(rt.Val, from, to, sc)
 		}
 	}
 	applyNodeWithScope(upd.WhereClause, from, to, sc)
@@ -131,14 +143,32 @@ func applyDelete(del *pg_query.DeleteStmt, from, to Name) {
 	if del == nil {
 		return
 	}
-	if from.Column == "" {
-		applyRangeVar(del.Relation, from, to, nil)
+	if del.WithClause != nil {
+		for _, cte := range del.WithClause.Ctes {
+			cteNode := cte.GetCommonTableExpr()
+			if cteNode != nil {
+				applySelect(cteNode.Ctequery.GetSelectStmt(), from, to)
+			}
+		}
 	}
 	sc := newReplaceScope(nil)
+	sc.registerCTEs(del.WithClause)
 	if rel := del.Relation; rel != nil {
 		sc.bindRangeVar(rel)
 	}
+	for _, n := range del.UsingClause {
+		sc.registerFromItem(n)
+	}
+	if from.Column == "" {
+		applyRangeVar(del.Relation, from, to, nil)
+	}
+	for _, n := range del.UsingClause {
+		applyFromItem(n, from, to, sc)
+	}
 	applyNodeWithScope(del.WhereClause, from, to, sc)
+	for _, t := range del.ReturningList {
+		applyNodeWithScope(t, from, to, sc)
+	}
 }
 
 func applyFromItem(node *pg_query.Node, from, to Name, sc *replaceScope) {

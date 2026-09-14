@@ -138,6 +138,120 @@ func TestReplace_updateSetExpressionColumns(t *testing.T) {
 	}
 }
 
+func TestReplace_updateFrom(t *testing.T) {
+	q, err := sqltransform.Parse(`
+		UPDATE users SET name = c.name FROM customers c WHERE users.customer = c.id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "users", Column: "name"}, sqltransform.Name{Table: "o_users", Column: "f_name"}},
+		{sqltransform.Name{Table: "users", Column: "customer"}, sqltransform.Name{Table: "o_users", Column: "f_customer"}},
+		{sqltransform.Name{Table: "customers", Column: "name"}, sqltransform.Name{Table: "o_customers", Column: "f_name"}},
+		{sqltransform.Name{Table: "customers", Column: "id"}, sqltransform.Name{Table: "o_customers", Column: "f_id"}},
+		{sqltransform.Name{Table: "users"}, sqltransform.Name{Table: "o_users"}},
+		{sqltransform.Name{Table: "customers"}, sqltransform.Name{Table: "o_customers"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "UPDATE o_users") {
+		t.Fatalf("expected target rewrite in %q", sql)
+	}
+	if !strings.Contains(sql, "FROM o_customers c") {
+		t.Fatalf("expected FROM table rewrite in %q", sql)
+	}
+	if strings.Contains(sql, "FROM customers") {
+		t.Fatalf("logical FROM table should be replaced in %q", sql)
+	}
+	if !strings.Contains(sql, "SET f_name = c.f_name") {
+		t.Fatalf("expected SET column rewrite in %q", sql)
+	}
+	if !strings.Contains(sql, "o_users.f_customer = c.f_id") && !strings.Contains(sql, "f_customer = c.f_id") {
+		t.Fatalf("expected WHERE column rewrite in %q", sql)
+	}
+}
+
+func TestReplace_updateFromCTE(t *testing.T) {
+	q, err := sqltransform.Parse(`
+		WITH src AS (SELECT id, name FROM customers)
+		UPDATE users SET name = src.name FROM src WHERE users.customer = src.id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "users", Column: "name"}, sqltransform.Name{Table: "o_users", Column: "f_name"}},
+		{sqltransform.Name{Table: "users", Column: "customer"}, sqltransform.Name{Table: "o_users", Column: "f_customer"}},
+		{sqltransform.Name{Table: "customers", Column: "name"}, sqltransform.Name{Table: "o_customers", Column: "f_name"}},
+		{sqltransform.Name{Table: "customers", Column: "id"}, sqltransform.Name{Table: "o_customers", Column: "f_id"}},
+		{sqltransform.Name{Table: "users"}, sqltransform.Name{Table: "o_users"}},
+		{sqltransform.Name{Table: "customers"}, sqltransform.Name{Table: "o_customers"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "FROM o_customers") {
+		t.Fatalf("expected CTE body table rewrite in %q", sql)
+	}
+	if !strings.Contains(sql, "FROM src") {
+		t.Fatalf("CTE name src should be preserved in %q", sql)
+	}
+	if strings.Contains(sql, "FROM o_src") {
+		t.Fatalf("CTE name must not be rewritten in %q", sql)
+	}
+}
+
+func TestReplace_deleteUsing(t *testing.T) {
+	q, err := sqltransform.Parse(`
+		DELETE FROM users USING customers c WHERE users.customer = c.id AND c.active`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "users", Column: "customer"}, sqltransform.Name{Table: "o_users", Column: "f_customer"}},
+		{sqltransform.Name{Table: "customers", Column: "id"}, sqltransform.Name{Table: "o_customers", Column: "f_id"}},
+		{sqltransform.Name{Table: "customers", Column: "active"}, sqltransform.Name{Table: "o_customers", Column: "f_active"}},
+		{sqltransform.Name{Table: "users"}, sqltransform.Name{Table: "o_users"}},
+		{sqltransform.Name{Table: "customers"}, sqltransform.Name{Table: "o_customers"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "DELETE FROM o_users") {
+		t.Fatalf("expected target rewrite in %q", sql)
+	}
+	if !strings.Contains(sql, "USING o_customers c") {
+		t.Fatalf("expected USING table rewrite in %q", sql)
+	}
+	if strings.Contains(sql, "USING customers") {
+		t.Fatalf("logical USING table should be replaced in %q", sql)
+	}
+}
+
 func TestReplace_columnUnqualifiedSingleTable(t *testing.T) {
 	q, err := sqltransform.Parse("SELECT author FROM book WHERE id = 1")
 	if err != nil {

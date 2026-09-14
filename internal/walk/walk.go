@@ -129,20 +129,42 @@ func walkInsert(ins *pg_query.InsertStmt, visit Visitor) {
 }
 
 func walkUpdate(upd *pg_query.UpdateStmt, visit Visitor) {
+	if upd.WithClause != nil {
+		for _, cte := range upd.WithClause.Ctes {
+			Node(cte, visit)
+		}
+	}
 	if upd.Relation != nil {
 		visit(&pg_query.Node{Node: &pg_query.Node_RangeVar{RangeVar: upd.Relation}})
+	}
+	for _, n := range upd.FromClause {
+		Node(n, visit)
 	}
 	for _, t := range upd.TargetList {
 		Node(t, visit)
 	}
 	Node(upd.WhereClause, visit)
+	for _, t := range upd.ReturningList {
+		Node(t, visit)
+	}
 }
 
 func walkDelete(del *pg_query.DeleteStmt, visit Visitor) {
+	if del.WithClause != nil {
+		for _, cte := range del.WithClause.Ctes {
+			Node(cte, visit)
+		}
+	}
 	if del.Relation != nil {
 		visit(&pg_query.Node{Node: &pg_query.Node_RangeVar{RangeVar: del.Relation}})
 	}
+	for _, n := range del.UsingClause {
+		Node(n, visit)
+	}
 	Node(del.WhereClause, visit)
+	for _, t := range del.ReturningList {
+		Node(t, visit)
+	}
 }
 
 func walkJoin(j *pg_query.JoinExpr, visit Visitor) {
