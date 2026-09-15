@@ -9,6 +9,7 @@ A Go library for parsing and transforming PostgreSQL DML queries.
 - Determine the top-level command type
 - **Rename** tables and columns in the query text
 - **Expand** `SELECT *` / `table.*` in projections and `RETURNING` lists to explicit columns
+- **Wrap** `UPDATE`/`INSERT` write expressions for selected columns (for example auto-hashing password values)
 
 Typical use cases:
 
@@ -156,6 +157,23 @@ err := q.ExpandStar(func(table sqltransform.Name) ([]sqltransform.Name, error) {
 Expansion runs through nested `SELECT`s, set operations (`UNION`, etc.), and CTE bodies. `INSERT ... SELECT` is expanded in the source query; `UPDATE`/`DELETE` stars are expanded only in `RETURNING` lists.
 
 After expansion, call `SQL()` to deparse the modified query.
+
+### `(*Query) WrapWriteExpressions(match, wrap) error`
+
+Rewrites expressions assigned in `UPDATE SET` and `INSERT ... VALUES` / `INSERT ... SELECT` for columns where `match` returns true. `wrap` receives the original expression as an opaque `Expr` and returns its replacement. Helpers `Call`, `StringLiteral`, and `IntLiteral` build replacement nodes without exposing the parser AST.
+
+```go
+err := q.WrapWriteExpressions(
+	func(col sqltransform.Name) bool { return col.Column == "password" },
+	func(_ sqltransform.Name, expr sqltransform.Expr) (sqltransform.Expr, error) {
+		return sqltransform.Call(
+			"crypt",
+			expr,
+			sqltransform.Call("gen_salt", sqltransform.StringLiteral("bf"), sqltransform.IntLiteral(12)),
+		), nil
+	},
+)
+```
 
 ### `(*Query) SQL() (string, error)`
 
