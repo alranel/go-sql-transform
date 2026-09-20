@@ -48,6 +48,80 @@ func TestReadReferences_cteResolution(t *testing.T) {
 	assertSetEqual(t, got, want)
 }
 
+func TestReadReferences_jsonbEachAlias(t *testing.T) {
+	q, err := sqltransform.Parse(`
+		WITH walk AS (SELECT '{}'::jsonb AS in_sede)
+		SELECT e.k, e.v
+		FROM walk AS w
+		CROSS JOIN LATERAL jsonb_each(w.in_sede) AS e(k, v)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := refStrings(q.ReadReferences())
+	if len(got) != 0 {
+		t.Fatalf("expected no physical refs for SRF/CTE-only query, got %v", got)
+	}
+}
+
+func TestReadReferences_jsonbArrayElementsWithBaseTable(t *testing.T) {
+	q, err := sqltransform.Parse(`
+		SELECT (elem->>'giorno')::date
+		FROM users
+		CROSS JOIN LATERAL jsonb_array_elements('[]'::jsonb) AS elem`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := refStrings(q.ReadReferences())
+	if len(got) != 0 {
+		t.Fatalf("expected SRF alias elem not attributed to users, got %v", got)
+	}
+}
+
+func TestReadReferences_syntheticCTEColumn(t *testing.T) {
+	q, err := sqltransform.Parse(`
+		WITH p AS (SELECT 1 AS x)
+		SELECT p.x FROM p`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := refStrings(q.ReadReferences())
+	if len(got) != 0 {
+		t.Fatalf("expected no physical refs for synthetic CTE column, got %v", got)
+	}
+}
+
+func TestReadReferences_siblingCTESyntheticColumn(t *testing.T) {
+	q, err := sqltransform.Parse(`
+		WITH
+		parametri AS (SELECT 1 AS id_ultimo_transito),
+		candidati AS (
+			SELECT t.id
+			FROM users AS t
+			CROSS JOIN parametri AS p
+			WHERE t.id > p.id_ultimo_transito
+		)
+		SELECT candidati.id FROM candidati`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := refStrings(q.ReadReferences())
+	want := []string{"users.id"}
+	assertSetEqual(t, got, want)
+}
+
+func TestReadReferences_lateralSeesOuterAlias(t *testing.T) {
+	q, err := sqltransform.Parse(`
+		SELECT k.chiave
+		FROM users AS u
+		CROSS JOIN LATERAL (SELECT u.id::text AS chiave) AS k`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := refStrings(q.ReadReferences())
+	want := []string{"users.id"}
+	assertSetEqual(t, got, want)
+}
+
 func TestReadReferences_schemaQualified(t *testing.T) {
 	q, err := sqltransform.Parse("SELECT * FROM public.users")
 	if err != nil {

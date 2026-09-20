@@ -35,6 +35,9 @@ type collector struct {
 }
 
 func (c *collector) add(n Name) {
+	if n.Schema == "" && n.Table == "" && n.Column == "" {
+		return
+	}
 	c.refs = append(c.refs, n)
 }
 
@@ -71,7 +74,7 @@ func (c *collector) collectSelect(sel *pg_query.SelectStmt, parentScope *scope) 
 
 	sc := newScope(parentScope)
 	sc.registerCTEs(sel.WithClause)
-	c.collectCTEBodies(sel.WithClause, parentScope)
+	c.collectCTEBodies(sel.WithClause, sc)
 	sc.registerFromClause(sel.FromClause)
 	for _, n := range sel.FromClause {
 		c.collectFromExprs(n, sc)
@@ -134,7 +137,7 @@ func (c *collector) collectUpdate(upd *pg_query.UpdateStmt, parentScope *scope) 
 	if c.mode == modeRead {
 		sc := newScope(parentScope)
 		sc.registerCTEs(upd.WithClause)
-		c.collectCTEBodies(upd.WithClause, parentScope)
+		c.collectCTEBodies(upd.WithClause, sc)
 		if rel != nil {
 			sc.bindRangeVar(rel)
 		}
@@ -164,7 +167,7 @@ func (c *collector) collectDelete(del *pg_query.DeleteStmt, parentScope *scope) 
 	if c.mode == modeRead {
 		sc := newScope(parentScope)
 		sc.registerCTEs(del.WithClause)
-		c.collectCTEBodies(del.WithClause, parentScope)
+		c.collectCTEBodies(del.WithClause, sc)
 		if rel != nil {
 			sc.bindRangeVar(rel)
 		}
@@ -203,8 +206,7 @@ func (c *collector) collectNode(node *pg_query.Node, sc *scope) {
 	case node.GetSubLink() != nil:
 		sl := node.GetSubLink()
 		c.collectNode(sl.Testexpr, sc)
-		subScope := newScope(sc)
-		c.collectSelect(sl.Subselect.GetSelectStmt(), subScope)
+		c.collectSelect(sl.Subselect.GetSelectStmt(), sc)
 	case node.GetJoinExpr() != nil:
 		j := node.GetJoinExpr()
 		c.collectNode(j.Larg, sc)
@@ -212,7 +214,11 @@ func (c *collector) collectNode(node *pg_query.Node, sc *scope) {
 		c.collectNode(j.Quals, sc)
 	case node.GetRangeSubselect() != nil:
 		rs := node.GetRangeSubselect()
-		c.collectSelect(rs.Subquery.GetSelectStmt(), sc.parent)
+		subParent := sc.parent
+		if rs.Lateral {
+			subParent = sc
+		}
+		c.collectSelect(rs.Subquery.GetSelectStmt(), subParent)
 	case node.GetSelectStmt() != nil:
 		c.collectSelect(node.GetSelectStmt(), sc.parent)
 	case node.GetFuncCall() != nil:
@@ -281,6 +287,15 @@ func (c *collector) collectFromExprs(node *pg_query.Node, sc *scope) {
 		}
 	case node.GetRangeSubselect() != nil:
 		rs := node.GetRangeSubselect()
-		c.collectSelect(rs.Subquery.GetSelectStmt(), sc.parent)
+		subParent := sc.parent
+		if rs.Lateral {
+			subParent = sc
+		}
+		c.collectSelect(rs.Subquery.GetSelectStmt(), subParent)
+	case node.GetRangeFunction() != nil:
+		rf := node.GetRangeFunction()
+		for _, f := range rf.Functions {
+			c.collectNode(f, sc)
+		}
 	}
 }

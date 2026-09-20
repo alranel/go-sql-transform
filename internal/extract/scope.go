@@ -9,6 +9,7 @@ type bindingKind int
 const (
 	bindingPhysical bindingKind = iota
 	bindingCTE
+	bindingVirtual // set-returning functions in FROM (jsonb_each, unnest, ...)
 )
 
 type binding struct {
@@ -19,8 +20,8 @@ type binding struct {
 }
 
 type cteInfo struct {
-	name        string
-	outputCols  map[string]Name // output column label -> physical ref
+	name       string
+	outputCols map[string]Name // output column label -> physical ref
 }
 
 type scope struct {
@@ -126,6 +127,32 @@ func (s *scope) registerFromItem(node *pg_query.Node) {
 		j := node.GetJoinExpr()
 		s.registerFromItem(j.Larg)
 		s.registerFromItem(j.Rarg)
+	case node.GetRangeFunction() != nil:
+		s.bindRangeFunction(node.GetRangeFunction())
+	case node.GetRangeSubselect() != nil:
+		s.bindRangeSubselect(node.GetRangeSubselect())
+	}
+}
+
+func (s *scope) bindRangeFunction(rf *pg_query.RangeFunction) {
+	if rf == nil || rf.Alias == nil || rf.Alias.Aliasname == "" {
+		return
+	}
+	name := rf.Alias.Aliasname
+	s.bindings[name] = &binding{
+		kind:  bindingVirtual,
+		alias: name,
+	}
+}
+
+func (s *scope) bindRangeSubselect(rs *pg_query.RangeSubselect) {
+	if rs == nil || rs.Alias == nil || rs.Alias.Aliasname == "" {
+		return
+	}
+	name := rs.Alias.Aliasname
+	s.bindings[name] = &binding{
+		kind:  bindingVirtual,
+		alias: name,
 	}
 }
 
@@ -247,7 +274,32 @@ func (s *scope) resolveParts(parts []string) Name {
 	}
 }
 
+func (s *scope) lookupBinding(name string) (*binding, bool) {
+	for cur := s; cur != nil; cur = cur.parent {
+		if b, ok := cur.bindings[name]; ok {
+			return b, true
+		}
+	}
+	return nil, false
+}
+
+func (s *scope) lookupCTE(name string) (*cteInfo, bool) {
+	for cur := s; cur != nil; cur = cur.parent {
+		if cte, ok := cur.ctes[name]; ok {
+			return cte, true
+		}
+	}
+	return nil, false
+}
+
 func (s *scope) resolveUnqualified(column string) Name {
+	// Single-column SRF aliases are often referenced unqualified by the
+	// alias name itself (e.g. jsonb_array_elements(...) AS elem → elem).
+	if b, ok := s.lookupBinding(column); ok && b.kind == bindingVirtual {
+		return Name{}
+	}
+	// Unqualified resolution uses only the local FROM list (not parent
+	// scopes), matching SQL visibility for non-correlated names.
 	if len(s.physical) == 1 {
 		t := s.physical[0]
 		return Name{Schema: t.Schema, Table: t.Table, Column: column}
@@ -256,24 +308,28 @@ func (s *scope) resolveUnqualified(column string) Name {
 		var resolved Name
 		cteMatches := 0
 		seenCTE := make(map[string]struct{})
-		for _, b := range s.bindings {
-			if b.kind != bindingCTE {
-				continue
-			}
-			if _, ok := seenCTE[b.cteName]; ok {
-				continue
-			}
-			seenCTE[b.cteName] = struct{}{}
-			if cte, ok := s.ctes[b.cteName]; ok {
-				if col, ok := cte.outputCols[column]; ok {
-					cteMatches++
-					resolved = col
+		for cur := s; cur != nil; cur = cur.parent {
+			for _, b := range cur.bindings {
+				if b.kind != bindingCTE {
+					continue
+				}
+				if _, ok := seenCTE[b.cteName]; ok {
+					continue
+				}
+				seenCTE[b.cteName] = struct{}{}
+				if cte, ok := s.lookupCTE(b.cteName); ok {
+					if col, ok := cte.outputCols[column]; ok {
+						cteMatches++
+						resolved = col
+					}
 				}
 			}
 		}
 		if cteMatches == 1 {
 			return resolved
 		}
+		// CTE/SRF-only scope with a synthetic column: not a physical ref.
+		return Name{}
 	}
 	if len(s.physical) > 1 {
 		return Name{Column: column}
@@ -282,27 +338,34 @@ func (s *scope) resolveUnqualified(column string) Name {
 }
 
 func (s *scope) resolveQualified(qualifier, column string) Name {
-	if b, ok := s.bindings[qualifier]; ok {
+	if b, ok := s.lookupBinding(qualifier); ok {
 		switch b.kind {
 		case bindingPhysical:
 			return Name{Schema: b.table.Schema, Table: b.table.Table, Column: column}
+		case bindingVirtual:
+			return Name{}
 		case bindingCTE:
-			if cte, ok := s.ctes[b.cteName]; ok {
+			if cte, ok := s.lookupCTE(b.cteName); ok {
 				if col, ok := cte.outputCols[column]; ok {
 					return col
 				}
 			}
+			// Synthetic CTE column (literal/expression): not a physical ref.
+			return Name{}
 		}
 	}
-	if cte, ok := s.ctes[qualifier]; ok {
+	if cte, ok := s.lookupCTE(qualifier); ok {
 		if col, ok := cte.outputCols[column]; ok {
 			return col
 		}
+		return Name{}
 	}
-	// qualifier may be physical table name directly
-	for _, t := range s.physical {
-		if t.Table == qualifier {
-			return Name{Schema: t.Schema, Table: t.Table, Column: column}
+	// qualifier may be physical table name directly (local or outer)
+	for cur := s; cur != nil; cur = cur.parent {
+		for _, t := range cur.physical {
+			if t.Table == qualifier {
+				return Name{Schema: t.Schema, Table: t.Table, Column: column}
+			}
 		}
 	}
 	return Name{Table: qualifier, Column: column}

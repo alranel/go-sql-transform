@@ -135,6 +135,10 @@ func collectFuncCallsInFrom(node *pg_query.Node, out *[]FuncCall) {
 		collectFuncCallsInExpr(j.Quals, out)
 	case node.GetRangeSubselect() != nil:
 		collectFuncCalls(node.GetRangeSubselect().Subquery, out)
+	case node.GetRangeFunction() != nil:
+		for _, f := range node.GetRangeFunction().Functions {
+			collectFuncCallsInExpr(f, out)
+		}
 	}
 }
 

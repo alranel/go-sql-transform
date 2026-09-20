@@ -60,7 +60,26 @@ func (s *replaceScope) registerFromItem(node *pg_query.Node) {
 		j := node.GetJoinExpr()
 		s.registerFromItem(j.Larg)
 		s.registerFromItem(j.Rarg)
+	case node.GetRangeFunction() != nil:
+		s.bindRangeFunction(node.GetRangeFunction())
+	case node.GetRangeSubselect() != nil:
+		s.bindRangeSubselect(node.GetRangeSubselect())
 	}
+}
+
+func (s *replaceScope) bindRangeFunction(rf *pg_query.RangeFunction) {
+	if rf == nil || rf.Alias == nil || rf.Alias.Aliasname == "" {
+		return
+	}
+	// Virtual relation: bind alias to itself so column rewrites skip it.
+	s.bindings[rf.Alias.Aliasname] = extract.Name{Table: rf.Alias.Aliasname}
+}
+
+func (s *replaceScope) bindRangeSubselect(rs *pg_query.RangeSubselect) {
+	if rs == nil || rs.Alias == nil || rs.Alias.Aliasname == "" {
+		return
+	}
+	s.bindings[rs.Alias.Aliasname] = extract.Name{Table: rs.Alias.Aliasname}
 }
 
 func (s *replaceScope) bindRangeVar(rv *pg_query.RangeVar) {

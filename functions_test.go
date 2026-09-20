@@ -48,7 +48,7 @@ func TestReadReferences_updateWithCTE(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := refStrings(q.ReadReferences())
-	want := []string{"active.id", "users.active", "users.id"}
+	want := []string{"users.active", "users.id"}
 	assertSetEqual(t, got, want)
 }
 

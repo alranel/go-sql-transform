@@ -185,6 +185,11 @@ func applyFromItem(node *pg_query.Node, from, to Name, sc *replaceScope) {
 		applyNodeWithScope(j.Quals, from, to, sc)
 	case node.GetRangeSubselect() != nil:
 		applyNode(node.GetRangeSubselect().Subquery, from, to)
+	case node.GetRangeFunction() != nil:
+		rf := node.GetRangeFunction()
+		for _, f := range rf.Functions {
+			applyNodeWithScope(f, from, to, sc)
+		}
 	}
 }
 
