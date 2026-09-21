@@ -22,7 +22,7 @@ func applyStmt(node *pg_query.Node, from, to Name) {
 	}
 	switch {
 	case node.GetSelectStmt() != nil:
-		applySelect(node.GetSelectStmt(), from, to)
+		applySelect(node.GetSelectStmt(), from, to, nil)
 	case node.GetInsertStmt() != nil:
 		applyInsert(node.GetInsertStmt(), from, to)
 	case node.GetUpdateStmt() != nil:
@@ -32,7 +32,7 @@ func applyStmt(node *pg_query.Node, from, to Name) {
 	}
 }
 
-func applySelect(sel *pg_query.SelectStmt, from, to Name) {
+func applySelect(sel *pg_query.SelectStmt, from, to Name, parent *replaceScope) {
 	if sel == nil {
 		return
 	}
@@ -40,18 +40,19 @@ func applySelect(sel *pg_query.SelectStmt, from, to Name) {
 		for _, cte := range sel.WithClause.Ctes {
 			cteNode := cte.GetCommonTableExpr()
 			if cteNode != nil {
-				applySelect(cteNode.Ctequery.GetSelectStmt(), from, to)
+				// CTE bodies do not see the outer query's FROM aliases.
+				applySelect(cteNode.Ctequery.GetSelectStmt(), from, to, nil)
 			}
 		}
 	}
 	switch sel.Op {
 	case pg_query.SetOperation_SETOP_UNION, pg_query.SetOperation_SETOP_INTERSECT, pg_query.SetOperation_SETOP_EXCEPT:
-		applySelect(sel.Larg, from, to)
-		applySelect(sel.Rarg, from, to)
+		applySelect(sel.Larg, from, to, parent)
+		applySelect(sel.Rarg, from, to, parent)
 		return
 	}
 
-	sc := newReplaceScope(nil)
+	sc := newReplaceScope(parent)
 	sc.registerCTEs(sel.WithClause)
 	sc.registerFromClause(sel.FromClause)
 
@@ -104,7 +105,7 @@ func applyUpdate(upd *pg_query.UpdateStmt, from, to Name) {
 		for _, cte := range upd.WithClause.Ctes {
 			cteNode := cte.GetCommonTableExpr()
 			if cteNode != nil {
-				applySelect(cteNode.Ctequery.GetSelectStmt(), from, to)
+				applySelect(cteNode.Ctequery.GetSelectStmt(), from, to, nil)
 			}
 		}
 	}
@@ -150,7 +151,7 @@ func applyDelete(del *pg_query.DeleteStmt, from, to Name) {
 		for _, cte := range del.WithClause.Ctes {
 			cteNode := cte.GetCommonTableExpr()
 			if cteNode != nil {
-				applySelect(cteNode.Ctequery.GetSelectStmt(), from, to)
+				applySelect(cteNode.Ctequery.GetSelectStmt(), from, to, nil)
 			}
 		}
 	}
@@ -187,7 +188,12 @@ func applyFromItem(node *pg_query.Node, from, to Name, sc *replaceScope) {
 		applyFromItem(j.Rarg, from, to, sc)
 		applyNodeWithScope(j.Quals, from, to, sc)
 	case node.GetRangeSubselect() != nil:
-		applyNode(node.GetRangeSubselect().Subquery, from, to)
+		rs := node.GetRangeSubselect()
+		var subParent *replaceScope
+		if rs.Lateral {
+			subParent = sc
+		}
+		applySelect(rs.Subquery.GetSelectStmt(), from, to, subParent)
 	case node.GetRangeFunction() != nil:
 		rf := node.GetRangeFunction()
 		for _, f := range rf.Functions {
@@ -234,16 +240,22 @@ func applyNodeWithScope(node *pg_query.Node, from, to Name, sc *replaceScope) {
 	case node.GetSubLink() != nil:
 		sl := node.GetSubLink()
 		applyNodeWithScope(sl.Testexpr, from, to, sc)
-		applyNode(sl.Subselect, from, to)
+		// Correlated subqueries see outer FROM aliases (NOT EXISTS, etc.).
+		applySelect(sl.Subselect.GetSelectStmt(), from, to, sc)
 	case node.GetJoinExpr() != nil:
 		j := node.GetJoinExpr()
 		applyNodeWithScope(j.Larg, from, to, sc)
 		applyNodeWithScope(j.Rarg, from, to, sc)
 		applyNodeWithScope(j.Quals, from, to, sc)
 	case node.GetRangeSubselect() != nil:
-		applyNode(node.GetRangeSubselect().Subquery, from, to)
+		rs := node.GetRangeSubselect()
+		var subParent *replaceScope
+		if rs.Lateral {
+			subParent = sc
+		}
+		applySelect(rs.Subquery.GetSelectStmt(), from, to, subParent)
 	case node.GetSelectStmt() != nil:
-		applySelect(node.GetSelectStmt(), from, to)
+		applySelect(node.GetSelectStmt(), from, to, sc)
 	case node.GetFuncCall() != nil:
 		fc := node.GetFuncCall()
 		for _, arg := range fc.Args {

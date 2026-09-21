@@ -405,3 +405,41 @@ func TestReplace_preservesSelectListAliasForCTE(t *testing.T) {
 		t.Fatalf("CTE column must stay logical: %q", sql)
 	}
 }
+
+func TestReplace_correlatedSubqueryOuterAlias(t *testing.T) {
+	// Outer alias p must still rewrite inside NOT EXISTS.
+	q, err := sqltransform.Parse(`
+		SELECT p.id
+		FROM permanenza AS p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM presenza AS pr
+			WHERE pr.transito_entrata IS NOT DISTINCT FROM p.transito_entrata
+		)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "permanenza", Column: "transito_entrata"}, sqltransform.Name{Table: "o_permanenza", Column: "f_transito_entrata"}},
+		{sqltransform.Name{Table: "permanenza", Column: "id"}, sqltransform.Name{Table: "o_permanenza", Column: "id"}},
+		{sqltransform.Name{Table: "presenza", Column: "transito_entrata"}, sqltransform.Name{Table: "o_presenza", Column: "f_transito_entrata"}},
+		{sqltransform.Name{Table: "permanenza"}, sqltransform.Name{Table: "o_permanenza"}},
+		{sqltransform.Name{Table: "presenza"}, sqltransform.Name{Table: "o_presenza"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sql, "p.transito_entrata") {
+		t.Fatalf("outer alias left unrewritten in subquery: %q", sql)
+	}
+	if !strings.Contains(sql, "p.f_transito_entrata") {
+		t.Fatalf("expected p.f_transito_entrata in subquery: %q", sql)
+	}
+}

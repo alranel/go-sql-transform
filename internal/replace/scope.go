@@ -106,13 +106,19 @@ func (s *replaceScope) bindRangeVar(rv *pg_query.RangeVar) {
 }
 
 func (s *replaceScope) isCTE(name string) bool {
-	_, ok := s.ctes[name]
-	return ok
+	for cur := s; cur != nil; cur = cur.parent {
+		if _, ok := cur.ctes[name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *replaceScope) physicalTableForQualifier(qualifier string) string {
-	if tn, ok := s.bindings[qualifier]; ok {
-		return tn.Table
+	for cur := s; cur != nil; cur = cur.parent {
+		if tn, ok := cur.bindings[qualifier]; ok {
+			return tn.Table
+		}
 	}
 	return ""
 }
@@ -123,17 +129,19 @@ func (s *replaceScope) aliasForTable(table string) string {
 		return ""
 	}
 	var found string
-	for qualifier, tn := range s.bindings {
-		if !equalFold(tn.Table, table) {
-			continue
+	for cur := s; cur != nil; cur = cur.parent {
+		for qualifier, tn := range cur.bindings {
+			if !equalFold(tn.Table, table) {
+				continue
+			}
+			if equalFold(qualifier, table) {
+				continue
+			}
+			if found != "" && !equalFold(found, qualifier) {
+				return ""
+			}
+			found = qualifier
 		}
-		if equalFold(qualifier, table) {
-			continue
-		}
-		if found != "" && !equalFold(found, qualifier) {
-			return ""
-		}
-		found = qualifier
 	}
 	return found
 }
