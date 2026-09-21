@@ -66,6 +66,9 @@ func collectFuncCallsInSelect(sel *pg_query.SelectStmt, out *[]FuncCall) {
 	for _, t := range sel.GroupClause {
 		collectFuncCallsInExpr(t, out)
 	}
+	for _, t := range sel.WindowClause {
+		collectFuncCallsInExpr(t, out)
+	}
 	collectFuncCallsInExpr(sel.HavingClause, out)
 	collectFuncCallsInExpr(sel.WhereClause, out)
 }
@@ -151,9 +154,13 @@ func collectFuncCallsInExpr(node *pg_query.Node, out *[]FuncCall) {
 		for _, arg := range fc.Args {
 			collectFuncCallsInExpr(arg, out)
 		}
+		for _, arg := range fc.AggOrder {
+			collectFuncCallsInExpr(arg, out)
+		}
 		if fc.AggFilter != nil {
 			collectFuncCallsInExpr(fc.AggFilter, out)
 		}
+		collectFuncCallsInWindowDef(fc.Over, out)
 		return
 	}
 	switch {
@@ -180,6 +187,8 @@ func collectFuncCallsInExpr(node *pg_query.Node, out *[]FuncCall) {
 		collectFuncCalls(node.GetRangeSubselect().Subquery, out)
 	case node.GetSelectStmt() != nil:
 		collectFuncCallsInSelect(node.GetSelectStmt(), out)
+	case node.GetWindowDef() != nil:
+		collectFuncCallsInWindowDef(node.GetWindowDef(), out)
 	case node.GetSortBy() != nil:
 		collectFuncCallsInExpr(node.GetSortBy().Node, out)
 	case node.GetCoalesceExpr() != nil:
@@ -237,6 +246,20 @@ func funcCallName(fc *pg_query.FuncCall) FuncCall {
 	default:
 		return FuncCall{Schema: parts[0], Name: parts[len(parts)-1]}
 	}
+}
+
+func collectFuncCallsInWindowDef(wd *pg_query.WindowDef, out *[]FuncCall) {
+	if wd == nil {
+		return
+	}
+	for _, n := range wd.PartitionClause {
+		collectFuncCallsInExpr(n, out)
+	}
+	for _, n := range wd.OrderClause {
+		collectFuncCallsInExpr(n, out)
+	}
+	collectFuncCallsInExpr(wd.StartOffset, out)
+	collectFuncCallsInExpr(wd.EndOffset, out)
 }
 
 func dedupFuncCalls(in []FuncCall) []FuncCall {

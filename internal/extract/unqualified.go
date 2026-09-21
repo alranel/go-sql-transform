@@ -70,6 +70,9 @@ func (c *unqualifiedCollector) collectSelect(sel *pg_query.SelectStmt) {
 	for _, t := range sel.GroupClause {
 		c.collectExpr(t)
 	}
+	for _, t := range sel.WindowClause {
+		c.collectExpr(t)
+	}
 	c.collectExpr(sel.HavingClause)
 	c.collectExpr(sel.WhereClause)
 }
@@ -184,12 +187,19 @@ func (c *unqualifiedCollector) collectExpr(node *pg_query.Node) {
 	case node.GetSelectStmt() != nil:
 		c.collectSelect(node.GetSelectStmt())
 	case node.GetFuncCall() != nil:
-		for _, arg := range node.GetFuncCall().Args {
+		fc := node.GetFuncCall()
+		for _, arg := range fc.Args {
 			c.collectExpr(arg)
 		}
-		if fc := node.GetFuncCall(); fc.AggFilter != nil {
+		for _, arg := range fc.AggOrder {
+			c.collectExpr(arg)
+		}
+		if fc.AggFilter != nil {
 			c.collectExpr(fc.AggFilter)
 		}
+		collectUnqualifiedWindowDef(c, fc.Over)
+	case node.GetWindowDef() != nil:
+		collectUnqualifiedWindowDef(c, node.GetWindowDef())
 	case node.GetSortBy() != nil:
 		c.collectExpr(node.GetSortBy().Node)
 	case node.GetCoalesceExpr() != nil:
@@ -230,6 +240,20 @@ func (c *unqualifiedCollector) collectExpr(node *pg_query.Node) {
 			c.collectExpr(item)
 		}
 	}
+}
+
+func collectUnqualifiedWindowDef(c *unqualifiedCollector, wd *pg_query.WindowDef) {
+	if wd == nil {
+		return
+	}
+	for _, n := range wd.PartitionClause {
+		c.collectExpr(n)
+	}
+	for _, n := range wd.OrderClause {
+		c.collectExpr(n)
+	}
+	c.collectExpr(wd.StartOffset)
+	c.collectExpr(wd.EndOffset)
 }
 
 func dedupStrings(in []string) []string {

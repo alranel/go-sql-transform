@@ -48,9 +48,17 @@ func walkChildren(node *pg_query.Node, visit Visitor) {
 	case node.GetColumnRef() != nil:
 		// leaf
 	case node.GetFuncCall() != nil:
-		for _, arg := range node.GetFuncCall().Args {
+		fc := node.GetFuncCall()
+		for _, arg := range fc.Args {
 			Node(arg, visit)
 		}
+		for _, arg := range fc.AggOrder {
+			Node(arg, visit)
+		}
+		Node(fc.AggFilter, visit)
+		walkWindowDef(fc.Over, visit)
+	case node.GetWindowDef() != nil:
+		walkWindowDef(node.GetWindowDef(), visit)
 	case node.GetResTarget() != nil:
 		Node(node.GetResTarget().Val, visit)
 	case node.GetSortBy() != nil:
@@ -117,6 +125,9 @@ func walkSelect(sel *pg_query.SelectStmt, visit Visitor) {
 			Node(n, visit)
 		}
 		Node(sel.HavingClause, visit)
+		for _, n := range sel.WindowClause {
+			Node(n, visit)
+		}
 		for _, n := range sel.SortClause {
 			Node(n, visit)
 		}
@@ -179,6 +190,20 @@ func walkJoin(j *pg_query.JoinExpr, visit Visitor) {
 	Node(j.Larg, visit)
 	Node(j.Rarg, visit)
 	Node(j.Quals, visit)
+}
+
+func walkWindowDef(wd *pg_query.WindowDef, visit Visitor) {
+	if wd == nil {
+		return
+	}
+	for _, n := range wd.PartitionClause {
+		Node(n, visit)
+	}
+	for _, n := range wd.OrderClause {
+		Node(n, visit)
+	}
+	Node(wd.StartOffset, visit)
+	Node(wd.EndOffset, visit)
 }
 
 // ParseResult walks all statements in a parse result.

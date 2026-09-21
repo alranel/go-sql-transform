@@ -67,6 +67,9 @@ func applySelect(sel *pg_query.SelectStmt, from, to Name) {
 	for _, n := range sel.GroupClause {
 		applyNodeWithScope(n, from, to, sc)
 	}
+	for _, n := range sel.WindowClause {
+		applyNodeWithScope(n, from, to, sc)
+	}
 	applyNodeWithScope(sel.HavingClause, from, to, sc)
 	applyNodeWithScope(sel.WhereClause, from, to, sc)
 }
@@ -231,9 +234,17 @@ func applyNodeWithScope(node *pg_query.Node, from, to Name, sc *replaceScope) {
 	case node.GetSelectStmt() != nil:
 		applySelect(node.GetSelectStmt(), from, to)
 	case node.GetFuncCall() != nil:
-		for _, arg := range node.GetFuncCall().Args {
+		fc := node.GetFuncCall()
+		for _, arg := range fc.Args {
 			applyNodeWithScope(arg, from, to, sc)
 		}
+		for _, arg := range fc.AggOrder {
+			applyNodeWithScope(arg, from, to, sc)
+		}
+		applyNodeWithScope(fc.AggFilter, from, to, sc)
+		applyWindowDef(fc.Over, from, to, sc)
+	case node.GetWindowDef() != nil:
+		applyWindowDef(node.GetWindowDef(), from, to, sc)
 	case node.GetSortBy() != nil:
 		applyNodeWithScope(node.GetSortBy().Node, from, to, sc)
 	case node.GetCoalesceExpr() != nil:
@@ -274,6 +285,20 @@ func applyNodeWithScope(node *pg_query.Node, from, to Name, sc *replaceScope) {
 			applyNodeWithScope(item, from, to, sc)
 		}
 	}
+}
+
+func applyWindowDef(wd *pg_query.WindowDef, from, to Name, sc *replaceScope) {
+	if wd == nil {
+		return
+	}
+	for _, n := range wd.PartitionClause {
+		applyNodeWithScope(n, from, to, sc)
+	}
+	for _, n := range wd.OrderClause {
+		applyNodeWithScope(n, from, to, sc)
+	}
+	applyNodeWithScope(wd.StartOffset, from, to, sc)
+	applyNodeWithScope(wd.EndOffset, from, to, sc)
 }
 
 func tableMatches(schema, table string, from Name) bool {

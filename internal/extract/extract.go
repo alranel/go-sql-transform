@@ -93,6 +93,9 @@ func (c *collector) collectSelect(sel *pg_query.SelectStmt, parentScope *scope) 
 	for _, t := range sel.GroupClause {
 		c.collectNode(t, sc)
 	}
+	for _, t := range sel.WindowClause {
+		c.collectNode(t, sc)
+	}
 	c.collectNode(sel.HavingClause, sc)
 	c.collectNode(sel.WhereClause, sc)
 	c.mode = prevMode
@@ -222,9 +225,17 @@ func (c *collector) collectNode(node *pg_query.Node, sc *scope) {
 	case node.GetSelectStmt() != nil:
 		c.collectSelect(node.GetSelectStmt(), sc.parent)
 	case node.GetFuncCall() != nil:
-		for _, arg := range node.GetFuncCall().Args {
+		fc := node.GetFuncCall()
+		for _, arg := range fc.Args {
 			c.collectNode(arg, sc)
 		}
+		for _, arg := range fc.AggOrder {
+			c.collectNode(arg, sc)
+		}
+		c.collectNode(fc.AggFilter, sc)
+		collectWindowDef(c, fc.Over, sc)
+	case node.GetWindowDef() != nil:
+		collectWindowDef(c, node.GetWindowDef(), sc)
 	case node.GetSortBy() != nil:
 		c.collectNode(node.GetSortBy().Node, sc)
 	case node.GetCoalesceExpr() != nil:
@@ -306,4 +317,18 @@ func (c *collector) collectFromExprs(node *pg_query.Node, sc *scope) {
 			c.collectNode(f, sc)
 		}
 	}
+}
+
+func collectWindowDef(c *collector, wd *pg_query.WindowDef, sc *scope) {
+	if wd == nil {
+		return
+	}
+	for _, n := range wd.PartitionClause {
+		c.collectNode(n, sc)
+	}
+	for _, n := range wd.OrderClause {
+		c.collectNode(n, sc)
+	}
+	c.collectNode(wd.StartOffset, sc)
+	c.collectNode(wd.EndOffset, sc)
 }

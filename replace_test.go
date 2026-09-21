@@ -329,3 +329,36 @@ func TestReplace_greatestInsideCTESubquery(t *testing.T) {
 		t.Fatalf("expected physical columns inside GREATEST: %q", sql)
 	}
 }
+
+func TestReplace_windowOverOrderBy(t *testing.T) {
+	// ORDER BY / PARTITION BY inside OVER are WindowDef, not top-level SortClause.
+	q, err := sqltransform.Parse(`
+		SELECT t.id, row_number() OVER (ORDER BY t.giorno, t.dataoratransito, t.id) AS rn
+		FROM transito AS t`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "transito", Column: "giorno"}, sqltransform.Name{Table: "o_transito", Column: "f_giorno"}},
+		{sqltransform.Name{Table: "transito", Column: "dataoratransito"}, sqltransform.Name{Table: "o_transito", Column: "f_dataoratransito"}},
+		{sqltransform.Name{Table: "transito", Column: "id"}, sqltransform.Name{Table: "o_transito", Column: "id"}},
+		{sqltransform.Name{Table: "transito"}, sqltransform.Name{Table: "o_transito"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sql, "t.giorno") || strings.Contains(sql, "t.dataoratransito") {
+		t.Fatalf("logical columns left inside OVER ORDER BY: %q", sql)
+	}
+	if !strings.Contains(sql, "t.f_giorno") || !strings.Contains(sql, "t.f_dataoratransito") {
+		t.Fatalf("expected physical columns inside OVER ORDER BY: %q", sql)
+	}
+}
