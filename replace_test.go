@@ -362,3 +362,46 @@ func TestReplace_windowOverOrderBy(t *testing.T) {
 		t.Fatalf("expected physical columns inside OVER ORDER BY: %q", sql)
 	}
 }
+
+func TestReplace_preservesSelectListAliasForCTE(t *testing.T) {
+	// SELECT t.giorno must deparse as t.f_giorno AS giorno so CTE consumers
+	// can still reference c.giorno.
+	q, err := sqltransform.Parse(`
+		WITH candidati AS (
+			SELECT t.id, t.giorno, t.sede
+			FROM transito AS t
+		)
+		SELECT c.giorno FROM candidati AS c`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "transito", Column: "giorno"}, sqltransform.Name{Table: "o_transito", Column: "f_giorno"}},
+		{sqltransform.Name{Table: "transito", Column: "sede"}, sqltransform.Name{Table: "o_transito", Column: "f_sede"}},
+		{sqltransform.Name{Table: "transito", Column: "id"}, sqltransform.Name{Table: "o_transito", Column: "id"}},
+		{sqltransform.Name{Table: "transito"}, sqltransform.Name{Table: "o_transito"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "t.f_giorno AS giorno") && !strings.Contains(sql, "t.f_giorno AS Giorno") {
+		// deparser may quote or use original casing from the ColumnRef
+		if !strings.Contains(strings.ToLower(sql), "t.f_giorno as giorno") {
+			t.Fatalf("expected AS giorno alias after rewrite: %q", sql)
+		}
+	}
+	if !strings.Contains(sql, "c.giorno") {
+		t.Fatalf("expected CTE consumer c.giorno unchanged: %q", sql)
+	}
+	if strings.Contains(sql, "c.f_giorno") {
+		t.Fatalf("CTE column must stay logical: %q", sql)
+	}
+}

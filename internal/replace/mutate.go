@@ -211,6 +211,17 @@ func applyNodeWithScope(node *pg_query.Node, from, to Name, sc *replaceScope) {
 		}
 	case node.GetResTarget() != nil:
 		rt := node.GetResTarget()
+		// Bare "SELECT t.col" becomes "SELECT t.f_col" after rewrite; without an
+		// explicit AS, Postgres renames the output to f_col and breaks CTE
+		// consumers that still use the logical name (c.col). Pin the alias first.
+		if from.Column != "" && rt.Name == "" {
+			if cr := unwrapColumnRef(rt.Val); cr != nil {
+				parts := columnRefParts(cr)
+				if len(parts) > 0 && equalFold(parts[len(parts)-1], from.Column) {
+					rt.Name = parts[len(parts)-1]
+				}
+			}
+		}
 		applyNodeWithScope(rt.Val, from, to, sc)
 	case node.GetAExpr() != nil:
 		ae := node.GetAExpr()
@@ -341,6 +352,22 @@ func applyResTargetName(rt *pg_query.ResTarget, from, to Name, table Name) {
 		return
 	}
 	rt.Name = to.Column
+}
+
+// unwrapColumnRef returns the ColumnRef inside Val, peeling TypeCast wrappers
+// (SELECT t.col::date still outputs column name "col").
+func unwrapColumnRef(val *pg_query.Node) *pg_query.ColumnRef {
+	for val != nil {
+		if cr := val.GetColumnRef(); cr != nil {
+			return cr
+		}
+		tc := val.GetTypeCast()
+		if tc == nil {
+			return nil
+		}
+		val = tc.Arg
+	}
+	return nil
 }
 
 func applyColumnRef(cr *pg_query.ColumnRef, from, to Name, sc *replaceScope) {
