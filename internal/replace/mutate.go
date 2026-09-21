@@ -240,6 +240,14 @@ func applyNodeWithScope(node *pg_query.Node, from, to Name, sc *replaceScope) {
 		for _, arg := range node.GetCoalesceExpr().Args {
 			applyNodeWithScope(arg, from, to, sc)
 		}
+	case node.GetMinMaxExpr() != nil:
+		for _, arg := range node.GetMinMaxExpr().Args {
+			applyNodeWithScope(arg, from, to, sc)
+		}
+	case node.GetNullIfExpr() != nil:
+		for _, arg := range node.GetNullIfExpr().Args {
+			applyNodeWithScope(arg, from, to, sc)
+		}
 	case node.GetRowExpr() != nil:
 		for _, arg := range node.GetRowExpr().Args {
 			applyNodeWithScope(arg, from, to, sc)

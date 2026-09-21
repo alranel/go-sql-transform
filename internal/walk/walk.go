@@ -59,6 +59,14 @@ func walkChildren(node *pg_query.Node, visit Visitor) {
 		for _, arg := range node.GetCoalesceExpr().Args {
 			Node(arg, visit)
 		}
+	case node.GetMinMaxExpr() != nil:
+		for _, arg := range node.GetMinMaxExpr().Args {
+			Node(arg, visit)
+		}
+	case node.GetNullIfExpr() != nil:
+		for _, arg := range node.GetNullIfExpr().Args {
+			Node(arg, visit)
+		}
 	case node.GetRowExpr() != nil:
 		for _, arg := range node.GetRowExpr().Args {
 			Node(arg, visit)

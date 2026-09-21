@@ -196,6 +196,14 @@ func (c *unqualifiedCollector) collectExpr(node *pg_query.Node) {
 		for _, arg := range node.GetCoalesceExpr().Args {
 			c.collectExpr(arg)
 		}
+	case node.GetMinMaxExpr() != nil:
+		for _, arg := range node.GetMinMaxExpr().Args {
+			c.collectExpr(arg)
+		}
+	case node.GetNullIfExpr() != nil:
+		for _, arg := range node.GetNullIfExpr().Args {
+			c.collectExpr(arg)
+		}
 	case node.GetRowExpr() != nil:
 		for _, arg := range node.GetRowExpr().Args {
 			c.collectExpr(arg)

@@ -186,6 +186,14 @@ func collectFuncCallsInExpr(node *pg_query.Node, out *[]FuncCall) {
 		for _, arg := range node.GetCoalesceExpr().Args {
 			collectFuncCallsInExpr(arg, out)
 		}
+	case node.GetMinMaxExpr() != nil:
+		for _, arg := range node.GetMinMaxExpr().Args {
+			collectFuncCallsInExpr(arg, out)
+		}
+	case node.GetNullIfExpr() != nil:
+		for _, arg := range node.GetNullIfExpr().Args {
+			collectFuncCallsInExpr(arg, out)
+		}
 	case node.GetRowExpr() != nil:
 		for _, arg := range node.GetRowExpr().Args {
 			collectFuncCallsInExpr(arg, out)

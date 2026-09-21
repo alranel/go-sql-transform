@@ -286,3 +286,46 @@ func TestReplace_columnUnqualifiedSingleTable(t *testing.T) {
 		t.Fatalf("expected o_book in %q", sql)
 	}
 }
+
+func TestReplace_greatestInsideCTESubquery(t *testing.T) {
+	// GREATEST/LEAST are MinMaxExpr in the Postgres AST, not FuncCall.
+	q, err := sqltransform.Parse(`
+		WITH parametri AS (
+			SELECT COALESCE((
+				SELECT t.giorno FROM permanenza AS p
+				JOIN transito AS t
+				  ON t.id = GREATEST(COALESCE(p.transito_entrata, 0), COALESCE(p.transito_uscita, 0))
+				ORDER BY GREATEST(COALESCE(p.transito_entrata, 0), COALESCE(p.transito_uscita, 0)) DESC
+				LIMIT 1
+			), CURRENT_DATE) AS giorno_partenza
+		)
+		SELECT p.giorno_partenza FROM parametri AS p`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := []struct {
+		from, to sqltransform.Name
+	}{
+		{sqltransform.Name{Table: "permanenza", Column: "transito_entrata"}, sqltransform.Name{Table: "o_permanenza", Column: "f_transito_entrata"}},
+		{sqltransform.Name{Table: "permanenza", Column: "transito_uscita"}, sqltransform.Name{Table: "o_permanenza", Column: "f_transito_uscita"}},
+		{sqltransform.Name{Table: "transito", Column: "giorno"}, sqltransform.Name{Table: "o_transito", Column: "f_giorno"}},
+		{sqltransform.Name{Table: "transito", Column: "id"}, sqltransform.Name{Table: "o_transito", Column: "id"}},
+		{sqltransform.Name{Table: "permanenza"}, sqltransform.Name{Table: "o_permanenza"}},
+		{sqltransform.Name{Table: "transito"}, sqltransform.Name{Table: "o_transito"}},
+	}
+	for _, r := range replacements {
+		if err := q.Replace(r.from, r.to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sql, "p.transito_entrata") || strings.Contains(sql, "p.transito_uscita") {
+		t.Fatalf("logical columns left inside GREATEST: %q", sql)
+	}
+	if !strings.Contains(sql, "p.f_transito_entrata") || !strings.Contains(sql, "p.f_transito_uscita") {
+		t.Fatalf("expected physical columns inside GREATEST: %q", sql)
+	}
+}

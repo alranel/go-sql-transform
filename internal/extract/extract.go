@@ -231,6 +231,14 @@ func (c *collector) collectNode(node *pg_query.Node, sc *scope) {
 		for _, arg := range node.GetCoalesceExpr().Args {
 			c.collectNode(arg, sc)
 		}
+	case node.GetMinMaxExpr() != nil:
+		for _, arg := range node.GetMinMaxExpr().Args {
+			c.collectNode(arg, sc)
+		}
+	case node.GetNullIfExpr() != nil:
+		for _, arg := range node.GetNullIfExpr().Args {
+			c.collectNode(arg, sc)
+		}
 	case node.GetRowExpr() != nil:
 		for _, arg := range node.GetRowExpr().Args {
 			c.collectNode(arg, sc)
