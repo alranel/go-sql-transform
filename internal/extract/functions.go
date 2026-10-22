@@ -228,6 +228,14 @@ func collectFuncCallsInExpr(node *pg_query.Node, out *[]FuncCall) {
 		for _, item := range node.GetList().Items {
 			collectFuncCallsInExpr(item, out)
 		}
+	case node.GetAArrayExpr() != nil:
+		for _, el := range node.GetAArrayExpr().Elements {
+			collectFuncCallsInExpr(el, out)
+		}
+	case node.GetArrayExpr() != nil:
+		for _, el := range node.GetArrayExpr().Elements {
+			collectFuncCallsInExpr(el, out)
+		}
 	}
 }
 

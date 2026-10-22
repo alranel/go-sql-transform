@@ -239,6 +239,14 @@ func (c *unqualifiedCollector) collectExpr(node *pg_query.Node) {
 		for _, item := range node.GetList().Items {
 			c.collectExpr(item)
 		}
+	case node.GetAArrayExpr() != nil:
+		for _, el := range node.GetAArrayExpr().Elements {
+			c.collectExpr(el)
+		}
+	case node.GetArrayExpr() != nil:
+		for _, el := range node.GetArrayExpr().Elements {
+			c.collectExpr(el)
+		}
 	}
 }
 

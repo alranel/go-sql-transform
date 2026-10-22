@@ -307,6 +307,16 @@ func applyNodeWithScope(node *pg_query.Node, from, to Name, sc *replaceScope) {
 		for _, item := range node.GetList().Items {
 			applyNodeWithScope(item, from, to, sc)
 		}
+	case node.GetAArrayExpr() != nil:
+		// ARRAY[a, b] parse-tree form (raw SQL).
+		for _, el := range node.GetAArrayExpr().Elements {
+			applyNodeWithScope(el, from, to, sc)
+		}
+	case node.GetArrayExpr() != nil:
+		// Analyzed ArrayExpr (same shape as A_ArrayExpr.elements).
+		for _, el := range node.GetArrayExpr().Elements {
+			applyNodeWithScope(el, from, to, sc)
+		}
 	}
 }
 

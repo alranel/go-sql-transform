@@ -275,6 +275,14 @@ func (c *collector) collectNode(node *pg_query.Node, sc *scope) {
 		for _, item := range node.GetList().Items {
 			c.collectNode(item, sc)
 		}
+	case node.GetAArrayExpr() != nil:
+		for _, el := range node.GetAArrayExpr().Elements {
+			c.collectNode(el, sc)
+		}
+	case node.GetArrayExpr() != nil:
+		for _, el := range node.GetArrayExpr().Elements {
+			c.collectNode(el, sc)
+		}
 	}
 }
 

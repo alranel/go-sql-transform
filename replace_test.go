@@ -443,3 +443,36 @@ func TestReplace_correlatedSubqueryOuterAlias(t *testing.T) {
 		t.Fatalf("expected p.f_transito_entrata in subquery: %q", sql)
 	}
 }
+
+func TestReplace_columnInsideArrayConstructor(t *testing.T) {
+	// ARRAY[d.nodo] must rewrite the element, not leave the logical column name.
+	q, err := sqltransform.Parse(`
+		UPDATE analisi a SET elementi = COALESCE(a.elementi, ARRAY[]::integer[]) || ARRAY[d.nodo]
+		FROM delega d
+		WHERE d.nodo IS NOT NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Replace(
+		sqltransform.Name{Table: "delega", Column: "nodo"},
+		sqltransform.Name{Table: "o_delega", Column: "f_nodo"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Replace(
+		sqltransform.Name{Table: "analisi", Column: "elementi"},
+		sqltransform.Name{Table: "o_analisi", Column: "f_elementi"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	sql, err := q.SQL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sql, "d.nodo") {
+		t.Fatalf("ARRAY element left unrewritten: %q", sql)
+	}
+	if !strings.Contains(sql, "d.f_nodo") {
+		t.Fatalf("expected d.f_nodo in ARRAY constructor: %q", sql)
+	}
+}
